@@ -26,6 +26,8 @@ add_library(netlib
   src/net/TcpConnection.cc
   src/net/TcpServer.cc
   src/chat/Codec.cc
+  src/chat/RoomManager.cc
+  src/chat/ChatServer.cc
   # Phase 2/3 继续加：
   # src/net/EventLoopThread.cc  src/net/EventLoopThreadPool.cc
   # src/chat/Codec.cc  src/chat/RoomManager.cc  src/chat/ChatServer.cc
@@ -36,6 +38,8 @@ target_link_libraries(netlib PUBLIC Threads::Threads)
 add_executable(hello examples/hello.cc)
 add_executable(echo_server examples/echo_server.cc)
 target_link_libraries(echo_server netlib)
+add_executable(chat_server examples/chat_server.cc)
+target_link_libraries(chat_server netlib)
 
 # ── 测试 ──
 enable_testing()
@@ -50,5 +54,4 @@ add_test(NAME codec_test COMMAND codec_test)
 # 后续阶段（逐 Task 解开）：
 # add_executable(eventloop_test tests/eventloop_test.cc); target_link_libraries(eventloop_test netlib)
 # add_test(NAME eventloop_test COMMAND eventloop_test)
-# add_executable(chat_server examples/chat_server.cc); target_link_libraries(chat_server netlib)
 # add_executable(bench_client bench/bench_client.cc);  target_link_libraries(bench_client netlib)
