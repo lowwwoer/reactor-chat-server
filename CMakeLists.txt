@@ -23,9 +23,10 @@ add_library(netlib
   src/net/EPollPoller.cc
   src/net/EventLoop.cc
   src/net/Acceptor.cc
+  src/net/TcpConnection.cc
   # Phase 2/3 继续加：
   # src/net/EventLoopThread.cc  src/net/EventLoopThreadPool.cc
-  # src/net/TcpConnection.cc    src/net/TcpServer.cc
+  # src/net/TcpServer.cc
   # src/chat/Codec.cc  src/chat/RoomManager.cc  src/chat/ChatServer.cc
 )
 target_link_libraries(netlib PUBLIC Threads::Threads)
