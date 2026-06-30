@@ -25,6 +25,7 @@ add_library(netlib
   src/net/Acceptor.cc
   src/net/TcpConnection.cc
   src/net/TcpServer.cc
+  src/chat/Codec.cc
   # Phase 2/3 继续加：
   # src/net/EventLoopThread.cc  src/net/EventLoopThreadPool.cc
   # src/chat/Codec.cc  src/chat/RoomManager.cc  src/chat/ChatServer.cc
@@ -42,9 +43,11 @@ add_executable(buffer_test tests/buffer_test.cc)
 target_link_libraries(buffer_test netlib)
 add_test(NAME buffer_test COMMAND buffer_test)
 
+add_executable(codec_test tests/codec_test.cc)
+target_link_libraries(codec_test netlib)
+add_test(NAME codec_test COMMAND codec_test)
+
 # 后续阶段（逐 Task 解开）：
-# add_executable(codec_test tests/codec_test.cc); target_link_libraries(codec_test netlib)
-# add_test(NAME codec_test COMMAND codec_test)
 # add_executable(eventloop_test tests/eventloop_test.cc); target_link_libraries(eventloop_test netlib)
 # add_test(NAME eventloop_test COMMAND eventloop_test)
 # add_executable(chat_server examples/chat_server.cc); target_link_libraries(chat_server netlib)
