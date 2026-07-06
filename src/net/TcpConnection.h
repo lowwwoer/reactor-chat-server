@@ -3,8 +3,9 @@
 // 用 shared_ptr 管理：连接随时可能断开，而断开那一刻可能正处在它自己的回调里，
 // 靠 Channel::tie 存的 weak_ptr 在事件处理期间把对象「钉住」，避免 use-after-free。
 //
-// 本阶段（Phase 2 / Task 8）：send 假定只在属主 loop 线程调用（单线程安全）。
-// Phase 3（Task 14）会用 loop_->runInLoop 把 send/shutdown 包成跨线程安全。
+// Phase 3（Task 14）起 send/shutdown 跨线程安全：不在属主 loop 线程时，
+// 用 loop_->runInLoop 把实际操作投递回属主线程串行执行（广播即依赖此保证）。
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <string>
@@ -30,7 +31,7 @@ class TcpConnection : public std::enable_shared_from_this<TcpConnection> {
   TcpConnection(const TcpConnection&) = delete;
   TcpConnection& operator=(const TcpConnection&) = delete;
 
-  void send(const std::string& msg);  // 本任务：仅本 loop 线程调用
+  void send(const std::string& msg);  // 任意线程可调：自动转发到属主 loop
   void shutdown();                     // 半关闭写端（输出缓冲 flush 完才真正 shutdown）
 
   void setConnectionCallback(ConnectionCallback cb) { connectionCallback_ = std::move(cb); }
@@ -56,11 +57,14 @@ class TcpConnection : public std::enable_shared_from_this<TcpConnection> {
   void handleWrite();
   void handleClose();
   void handleError();
+  void sendInLoop(const std::string& msg);  // 真正的写逻辑，只在属主线程执行
   void shutdownInLoop();
 
   EventLoop* loop_;
   const std::string name_;
-  StateE state_ = kConnecting;
+  // atomic：state_ 只由属主线程写，但 send()/connected() 可能从别的线程读
+  //（广播路径），原子读写避免数据竞争（TSan 验证）。
+  std::atomic<StateE> state_{kConnecting};
 
   std::unique_ptr<Socket> socket_;    // 拥有 connfd，析构即 close
   std::unique_ptr<Channel> channel_;  // connfd 上的事件分发器

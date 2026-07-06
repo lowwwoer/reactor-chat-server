@@ -2,8 +2,8 @@
 // TcpServer：把 Acceptor + 一堆 TcpConnection 组装成「一个服务器」的门面。
 // 业务方只需 setMessageCallback / setConnectionCallback 再 start()，不碰 epoll 细节。
 //
-// 本阶段（Phase 2 / Task 9）：单线程——所有连接都建在 baseLoop 上。
-// Phase 3（Task 13）会接入从 Reactor 线程池，把新连接轮询分发到各 IO 线程。
+// Phase 3（Task 14）起为主从 Reactor：baseLoop 只 accept，新连接轮询分发到
+// EventLoopThreadPool 里的 IO 线程；setThreadNum(0) 则退化回单线程（阶段二行为）。
 #include <map>
 #include <memory>
 #include <string>
@@ -12,6 +12,7 @@
 
 class EventLoop;
 class Acceptor;
+class EventLoopThreadPool;
 
 class TcpServer {
  public:
@@ -21,11 +22,11 @@ class TcpServer {
   TcpServer(const TcpServer&) = delete;
   TcpServer& operator=(const TcpServer&) = delete;
 
-  void setThreadNum(int n) { threadNum_ = n; }  // Task 13 生效，本任务先存值
+  void setThreadNum(int n) { threadNum_ = n; }  // 须在 start() 前调用
   void setConnectionCallback(ConnectionCallback cb) { connectionCallback_ = std::move(cb); }
   void setMessageCallback(MessageCallback cb) { messageCallback_ = std::move(cb); }
 
-  void start();  // 开始监听
+  void start();  // 启动 IO 线程池 + 开始监听
 
  private:
   void newConnection(int sockfd, const InetAddress& peer);  // Acceptor 回调进来
@@ -35,10 +36,12 @@ class TcpServer {
   const std::string name_;
   const InetAddress listenAddr_;  // 作为新连接的 local 地址传给 TcpConnection
   std::unique_ptr<Acceptor> acceptor_;
+  std::unique_ptr<EventLoopThreadPool> threadPool_;  // 从 Reactor：IO 线程池
 
   ConnectionCallback connectionCallback_;
   MessageCallback messageCallback_;
-  std::map<std::string, TcpConnectionPtr> connections_;  // 连接名 → 连接
+  // 连接表只在 baseLoop 线程读写（newConnection / removeConnection 都回 baseLoop），无需加锁。
+  std::map<std::string, TcpConnectionPtr> connections_;
   int nextConnId_ = 1;
   int threadNum_ = 0;
 };

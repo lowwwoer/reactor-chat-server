@@ -54,7 +54,18 @@ void TcpConnection::handleRead() {
 }
 
 void TcpConnection::send(const std::string& msg) {
-  // 本任务假定在属主 loop 线程调用；Task 14 会用 runInLoop 包成跨线程安全。
+  if (state_ != kConnected) return;
+  if (loop_->isInLoopThread()) {
+    sendInLoop(msg);
+  } else {
+    // 跨线程（典型：别的 IO 线程在广播）：把写操作投递回属主线程。
+    // 捕获 shared_from_this() 保证任务执行时连接对象还活着。
+    loop_->runInLoop([self = shared_from_this(), m = msg] { self->sendInLoop(m); });
+  }
+}
+
+void TcpConnection::sendInLoop(const std::string& msg) {
+  // 投递与执行之间连接可能已断开，进属主线程后再查一次状态。
   if (state_ != kConnected) return;
 
   ssize_t nwrote = 0;
@@ -66,7 +77,7 @@ void TcpConnection::send(const std::string& msg) {
       remaining = msg.size() - nwrote;
     } else {
       nwrote = 0;
-      if (errno != EWOULDBLOCK) LOG_SYSERR("TcpConnection::send");
+      if (errno != EWOULDBLOCK) LOG_SYSERR("TcpConnection::sendInLoop");
     }
   }
   // 没一次写完：剩余进输出缓冲，开始关注可写事件，等内核可写时由 handleWrite 续写。
@@ -94,8 +105,8 @@ void TcpConnection::handleWrite() {
 void TcpConnection::shutdown() {
   if (state_ == kConnected) {
     state_ = kDisconnecting;
-    // 单线程阶段直接调用；Task 14 会改成 loop_->runInLoop(shutdownInLoop) 保证在属主线程执行。
-    shutdownInLoop();
+    // shutdownWrite 动的是 channel/socket 状态，必须回属主线程执行。
+    loop_->runInLoop([self = shared_from_this()] { self->shutdownInLoop(); });
   }
 }
 
