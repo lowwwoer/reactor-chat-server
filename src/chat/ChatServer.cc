@@ -31,10 +31,15 @@ void ChatServer::onMessage(const TcpConnectionPtr& conn, Buffer* buf) {
   auto session = std::static_pointer_cast<Session>(conn->getContext());
   for (const std::string& line : codec::takeLines(buf)) {
     if (line.rfind("/nick ", 0) == 0) {
-      session->nick = line.substr(6);
-      conn->send("昵称已设为 " + session->nick + "\n");
+      const std::string nick = line.substr(6);
+      rooms_.setNick(conn, nick);  // members() 会跨线程读 nick，写必须持 RoomManager 锁
+      conn->send("昵称已设为 " + nick + "\n");
     } else if (line.rfind("/join ", 0) == 0) {
       const std::string room = line.substr(6);
+      if (room.empty()) {  // 空串是「未进房」哨兵，进了 rooms_[""] 断开时 leave 摘不掉
+        conn->send("房间名不能为空。\n");
+        continue;
+      }
       rooms_.join(room, conn);
       rooms_.broadcast(
           room, codec::formatBroadcast(room, "系统", session->nick + " 加入了房间"));

@@ -2,6 +2,12 @@
 
 #include <memory>
 
+void RoomManager::setNick(const TcpConnectionPtr& conn, const std::string& nick) {
+  auto session = std::static_pointer_cast<Session>(conn->getContext());
+  std::lock_guard<std::mutex> lk(mutex_);
+  session->nick = nick;
+}
+
 void RoomManager::join(const std::string& room, const TcpConnectionPtr& conn) {
   auto session = std::static_pointer_cast<Session>(conn->getContext());
   std::lock_guard<std::mutex> lk(mutex_);
