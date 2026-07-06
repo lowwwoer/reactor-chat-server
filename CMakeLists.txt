@@ -54,5 +54,6 @@ add_executable(eventloop_test tests/eventloop_test.cc)
 target_link_libraries(eventloop_test netlib)
 add_test(NAME eventloop_test COMMAND eventloop_test)
 
-# 后续阶段（逐 Task 解开）：
-# add_executable(bench_client bench/bench_client.cc);  target_link_libraries(bench_client netlib)
+# ── 压测 ──
+add_executable(bench_client bench/bench_client.cc)
+target_link_libraries(bench_client netlib)
