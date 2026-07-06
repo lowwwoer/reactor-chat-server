@@ -1,10 +1,11 @@
 #pragma once
 // EventLoop：事件循环。one loop per thread —— 每个线程恰好拥有一个 EventLoop。
-// 本阶段（Phase 1）是单线程版本；Phase 3 会加入 eventfd 唤醒与加锁，
-// 让 runInLoop/queueInLoop 支持跨线程安全投递（见设计文档 §6）。
+// Phase 3 起支持跨线程投递：runInLoop 在本线程直接执行，否则排队并用 eventfd
+// 唤醒阻塞中的 epoll_wait，让任务回到属主线程串行执行（见设计文档 §6）。
 #include <atomic>
 #include <vector>
 #include <memory>
+#include <mutex>
 #include <functional>
 #include <thread>
 
@@ -19,13 +20,13 @@ class EventLoop {
   ~EventLoop();
 
   void loop();  // 事件循环：poll → 处理就绪事件 → 执行排队的任务
-  void quit();
+  void quit();  // 可跨线程调用：置位后若不在本线程则 wakeup 立刻退出
 
-  // 把任务排到「本轮事件处理结束后」执行。
-  // 典型用途：在某个 Channel 的回调里，安全地销毁该 Channel 本身
-  //（不能在回调里直接析构自己，只能推迟到回调返回之后）。
+  // 跨线程安全投递：在属主线程则直接执行，否则排队 + 唤醒该 loop。
+  // 这是整套并发设计的安全阀——别的线程永远不直接碰本 loop 的连接状态。
   void runInLoop(Functor cb);
   void queueInLoop(Functor cb);
+  void wakeup();  // 往 eventfd 写 8 字节，叫醒阻塞中的 epoll_wait
 
   void updateChannel(Channel* ch);
   void removeChannel(Channel* ch);
@@ -34,10 +35,16 @@ class EventLoop {
 
  private:
   void doPendingFunctors();
+  void handleWakeup();  // 读掉 eventfd 计数，避免 LT 模式下反复触发
 
   std::atomic<bool> quit_{false};
   const std::thread::id threadId_;            // 创建本 loop 的线程
   std::unique_ptr<EPollPoller> poller_;
   std::vector<Channel*> activeChannels_;      // 每轮 poll 的就绪 Channel
-  std::vector<Functor> pendingFunctors_;      // 待执行的延迟任务
+
+  int wakeupFd_ = -1;                          // eventfd：跨线程唤醒
+  std::unique_ptr<Channel> wakeupChannel_;
+  std::mutex mutex_;                           // 保护 pendingFunctors_（唯一跨线程入口）
+  std::vector<Functor> pendingFunctors_;       // 待执行的延迟任务
+  std::atomic<bool> callingPendingFunctors_{false};
 };

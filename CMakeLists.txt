@@ -51,7 +51,9 @@ add_executable(codec_test tests/codec_test.cc)
 target_link_libraries(codec_test netlib)
 add_test(NAME codec_test COMMAND codec_test)
 
+add_executable(eventloop_test tests/eventloop_test.cc)
+target_link_libraries(eventloop_test netlib)
+add_test(NAME eventloop_test COMMAND eventloop_test)
+
 # 后续阶段（逐 Task 解开）：
-# add_executable(eventloop_test tests/eventloop_test.cc); target_link_libraries(eventloop_test netlib)
-# add_test(NAME eventloop_test COMMAND eventloop_test)
 # add_executable(bench_client bench/bench_client.cc);  target_link_libraries(bench_client netlib)
