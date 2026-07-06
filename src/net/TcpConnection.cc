@@ -7,9 +7,11 @@
 #include <unistd.h>
 
 TcpConnection::TcpConnection(EventLoop* loop, std::string name, int sockfd,
-                             const InetAddress& local, const InetAddress& peer)
+                             const InetAddress& local, const InetAddress& peer,
+                             bool et)
     : loop_(loop),
       name_(std::move(name)),
+      et_(et),
       socket_(std::make_unique<Socket>(sockfd)),
       channel_(std::make_unique<Channel>(loop, sockfd)),
       localAddr_(local),
@@ -25,6 +27,7 @@ TcpConnection::TcpConnection(EventLoop* loop, std::string name, int sockfd,
 void TcpConnection::connectEstablished() {
   state_ = kConnected;
   channel_->tie(shared_from_this());  // weak_ptr 钉住生命周期，保护事件处理期
+  if (et_) channel_->enableET();      // ET 位要在注册 epoll 之前置好
   channel_->enableReading();          // 注册到 epoll，开始关注可读
   if (connectionCallback_) connectionCallback_(shared_from_this());
 }
@@ -40,17 +43,24 @@ void TcpConnection::connectDestroyed() {
 }
 
 void TcpConnection::handleRead() {
-  int savedErrno = 0;
-  ssize_t n = inputBuffer_.readFd(channel_->fd(), &savedErrno);
-  if (n > 0) {
-    // 把可读数据交给上层；inputBuffer_ 里可能是半包，由上层（Codec）决定取多少。
-    if (messageCallback_) messageCallback_(shared_from_this(), &inputBuffer_);
-  } else if (n == 0) {
-    handleClose();  // 对端正常关闭
-  } else {
-    errno = savedErrno;
-    handleError();
-  }
+  // LT：读一次即可，没读完 epoll 下轮还会通知；
+  // ET：本次通知是唯一的机会，必须循环读到 EAGAIN，否则剩余数据永远没有下次通知。
+  do {
+    int savedErrno = 0;
+    ssize_t n = inputBuffer_.readFd(channel_->fd(), &savedErrno);
+    if (n > 0) {
+      // 把可读数据交给上层；inputBuffer_ 里可能是半包，由上层（Codec）决定取多少。
+      if (messageCallback_) messageCallback_(shared_from_this(), &inputBuffer_);
+    } else if (n == 0) {
+      handleClose();  // 对端正常关闭
+      return;
+    } else {
+      if (savedErrno == EAGAIN || savedErrno == EWOULDBLOCK) return;  // 读干净了（ET 的正常出口）
+      errno = savedErrno;
+      handleError();
+      return;
+    }
+  } while (et_);
 }
 
 void TcpConnection::send(const std::string& msg) {
@@ -89,17 +99,25 @@ void TcpConnection::sendInLoop(const std::string& msg) {
 
 void TcpConnection::handleWrite() {
   if (!channel_->isWriting()) return;
-  ssize_t n = ::write(channel_->fd(), outputBuffer_.peek(),
-                      outputBuffer_.readableBytes());
-  if (n > 0) {
-    outputBuffer_.retrieve(n);
-    if (outputBuffer_.readableBytes() == 0) {
-      channel_->disableWriting();  // 写空了就别再关注可写，否则 epoll 会一直空转
-      if (state_ == kDisconnecting) shutdownInLoop();  // 之前请求过关闭：flush 完再关
+  // LT：写一次即可，还可写的话 epoll 下轮还会通知；
+  // ET：可写边沿只报一次，必须写到「缓冲空」或「内核满(EAGAIN)」，
+  //     否则既没写完也等不到下次通知，数据滞留在 outputBuffer_。
+  do {
+    ssize_t n = ::write(channel_->fd(), outputBuffer_.peek(),
+                        outputBuffer_.readableBytes());
+    if (n > 0) {
+      outputBuffer_.retrieve(n);
+      if (outputBuffer_.readableBytes() == 0) {
+        channel_->disableWriting();  // 写空了就别再关注可写，否则 epoll 会一直空转
+        if (state_ == kDisconnecting) shutdownInLoop();  // 之前请求过关闭：flush 完再关
+        return;
+      }
+    } else {
+      // EAGAIN：内核发送缓冲满，等下一次可写通知（ET 由内核腾空间时产生新边沿）
+      if (errno != EAGAIN && errno != EWOULDBLOCK) LOG_SYSERR("TcpConnection::handleWrite");
+      return;
     }
-  } else {
-    LOG_SYSERR("TcpConnection::handleWrite");
-  }
+  } while (et_);
 }
 
 void TcpConnection::shutdown() {

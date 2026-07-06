@@ -25,8 +25,11 @@ using CloseCallback = std::function<void(const TcpConnectionPtr&)>;
 
 class TcpConnection : public std::enable_shared_from_this<TcpConnection> {
  public:
+  // et = true 时本连接用 ET（边沿触发）：handleRead/handleWrite 会循环到 EAGAIN
+  //（附录 A 拉伸项）。默认 LT，与全库基准行为一致。
   TcpConnection(EventLoop* loop, std::string name, int sockfd,
-                const InetAddress& local, const InetAddress& peer);
+                const InetAddress& local, const InetAddress& peer,
+                bool et = false);
 
   TcpConnection(const TcpConnection&) = delete;
   TcpConnection& operator=(const TcpConnection&) = delete;
@@ -62,6 +65,7 @@ class TcpConnection : public std::enable_shared_from_this<TcpConnection> {
 
   EventLoop* loop_;
   const std::string name_;
+  const bool et_;  // 本连接是否 ET 模式（决定读写是否 drain 循环）
   // atomic：state_ 只由属主线程写，但 send()/connected() 可能从别的线程读
   //（广播路径），原子读写避免数据竞争（TSan 验证）。
   std::atomic<StateE> state_{kConnecting};

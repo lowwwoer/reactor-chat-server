@@ -15,7 +15,8 @@ class ChatServer {
  public:
   ChatServer(EventLoop* loop, const InetAddress& addr);
 
-  void setThreadNum(int n);  // 透传给内部 TcpServer（Task 13 生效）
+  void setThreadNum(int n);        // 透传给内部 TcpServer（Task 13 生效）
+  void setEdgeTriggered(bool on);  // 透传：连接改用 ET（附录 A 拉伸项）
   void start();
 
  private:

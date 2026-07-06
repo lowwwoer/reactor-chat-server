@@ -1,6 +1,6 @@
 # 多线程 TCP 聊天服务器（C++17 · epoll · 主从 Reactor）
 
-用 C++17 从零实现的多线程 TCP 聊天服务器：**epoll(LT) + 主从 Reactor（one-loop-per-thread）**，
+用 C++17 从零实现的多线程 TCP 聊天服务器：**epoll(LT 默认，ET 可选) + 主从 Reactor（one-loop-per-thread）**，
 支持多房间广播；跨线程收发用 `runInLoop` + eventfd 唤醒保证线程安全，并通过
 **ThreadSanitizer / AddressSanitizer** 验证零竞争、零内存错误。
 
@@ -90,15 +90,28 @@ hello everyone   # 普通文本广播到当前房间
 单房间广播的全局锁串行化与跨线程任务投递开销，这也是 6 vCPU 上
 压测端 200 线程与服务器同机抢核的合成结果。
 
+**LT vs ET（可选 ET 模式：`CHAT_ET=1` 开启；4 IO 线程，其余口径同上）：**
+
+| 场景 | LT | ET |
+|---|---:|---:|
+| 20 房间（扇出 10） | 81,088 msg/s · p99 50.5ms | **90,092 msg/s** · p99 47.3ms |
+| 单房间（扇出 200） | **1,407,894 msg/s** · p99 126ms | 420,969 msg/s · p50 秒级 |
+
+结论：中等扇出下 ET 省掉重复的 epoll 通知，吞吐 **+11%**（复跑 +20%，方向稳定）；
+但极端扇出下 ET 必需的 drain-to-EAGAIN 写循环会让热连接长时间独占 IO 线程，
+同 loop 的其他连接被饿死——吞吐崩至 LT 的 1/3、p50 达秒级（复跑一致）。
+这是 ET 的经典公平性陷阱，也是本项目**默认 LT** 的实证理由：公平性与可预期延迟优先于峰值。
+
 ## 测试
 
 ```bash
 # 单测（Buffer/Codec/EventLoop 跨线程投递）
 ./build/buffer_test && ./build/codec_test && ./build/eventloop_test
-# 集成（echo / 多客户端聊天 / 大消息半关闭）
+# 集成（echo / 多客户端聊天 / 大消息半关闭 / ET 模式 2MB drain）
 python3 tests/integration/echo_it.py
 python3 tests/integration/chat_it.py
 python3 tests/integration/halfclose_it.py
+python3 tests/integration/et_mode_it.py
 # sanitizer 构建（CHAT_BIN 切换被测二进制）
 cmake -S . -B build-tsan -DSAN=thread && cmake --build build-tsan -j
 CHAT_BIN=./build-tsan/chat_server python3 tests/integration/chat_it.py

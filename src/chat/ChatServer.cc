@@ -16,6 +16,8 @@ ChatServer::ChatServer(EventLoop* loop, const InetAddress& addr)
 
 void ChatServer::setThreadNum(int n) { server_.setThreadNum(n); }
 
+void ChatServer::setEdgeTriggered(bool on) { server_.setEdgeTriggered(on); }
+
 void ChatServer::start() { server_.start(); }
 
 void ChatServer::onConnection(const TcpConnectionPtr& conn) {

@@ -28,7 +28,8 @@ void TcpServer::newConnection(int sockfd, const InetAddress& peer) {
   std::string connName = name_ + "#" + std::to_string(nextConnId_++);
   // 主从 Reactor 的分发点：从线程池轮询领一个 IO loop，这条连接终生归它管。
   EventLoop* ioLoop = threadPool_->getNextLoop();
-  auto conn = std::make_shared<TcpConnection>(ioLoop, connName, sockfd, listenAddr_, peer);
+  auto conn = std::make_shared<TcpConnection>(ioLoop, connName, sockfd, listenAddr_, peer,
+                                              edgeTriggered_);
   connections_[connName] = conn;
   conn->setConnectionCallback(connectionCallback_);
   conn->setMessageCallback(messageCallback_);

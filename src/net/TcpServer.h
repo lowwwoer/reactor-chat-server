@@ -23,6 +23,9 @@ class TcpServer {
   TcpServer& operator=(const TcpServer&) = delete;
 
   void setThreadNum(int n) { threadNum_ = n; }  // 须在 start() 前调用
+  // 连接 fd 改用 ET 边沿触发（附录 A 拉伸项），须在 start() 前调用。
+  // 监听 fd 保持 LT：accept 循环本就取到 EAGAIN，且 LT 在 EMFILE 等瞬时失败后还会再通知。
+  void setEdgeTriggered(bool on) { edgeTriggered_ = on; }
   void setConnectionCallback(ConnectionCallback cb) { connectionCallback_ = std::move(cb); }
   void setMessageCallback(MessageCallback cb) { messageCallback_ = std::move(cb); }
 
@@ -44,4 +47,5 @@ class TcpServer {
   std::map<std::string, TcpConnectionPtr> connections_;
   int nextConnId_ = 1;
   int threadNum_ = 0;
+  bool edgeTriggered_ = false;
 };

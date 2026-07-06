@@ -30,6 +30,10 @@ class Channel {
   int events() const { return events_; }
   void set_revents(int revt) { revents_ = revt; }
 
+  // ET（边沿触发，附录 A 拉伸项）：就绪状态「从无到有」才通知一次，回调必须
+  // 一次处理干净（循环到 EAGAIN）。须在 enableReading 之前调用（随后的 update 生效）；
+  // disableAll 会连 ET 位一起清掉，但那只发生在连接拆除时，无影响。
+  void enableET() { events_ |= EPOLLET; }
   void enableReading() { events_ |= kReadEvent; update(); }
   void disableReading() { events_ &= ~kReadEvent; update(); }
   void enableWriting() { events_ |= kWriteEvent; update(); }
