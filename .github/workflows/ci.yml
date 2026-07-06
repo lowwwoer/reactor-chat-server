@@ -1,0 +1,61 @@
+# GitHub Actions CI：push / PR 时在 Linux 上构建并跑全部测试。
+# 本项目依赖 epoll 只能在 Linux 构建，而 ubuntu-latest 原生就是 Linux，直接编译即可；
+# 不走 docker/Dockerfile（它为国内网络配了 DaoCloud/USTC 镜像源，在海外 runner 上反而慢且易失败）。
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  # ── 常规构建 + 单元测试 + 集成测试 ──
+  build-and-test:
+    runs-on: ubuntu-latest # runner 自带 gcc/cmake/python3，无需安装任何依赖
+    timeout-minutes: 15 # 兜底：万一测试卡死，别占着 runner（默认上限 6 小时）
+    steps:
+      - uses: actions/checkout@v6 # 把仓库代码拉到 runner 上
+
+      - name: CMake 配置 + 构建
+        run: |
+          cmake -S . -B build
+          cmake --build build -j
+
+      # CMakeLists.txt 里 add_test 注册的三个单测：buffer / codec / eventloop
+      - name: 单元测试（CTest）
+        run: ctest --test-dir build --output-on-failure
+
+      # 每个脚本自己拉起 chat_server / echo_server 子进程，跑完自行终止；断言失败即非零退出
+      - name: 集成测试（Python 多客户端）
+        run: |
+          for t in tests/integration/*.py; do
+            echo "==> $t"
+            python3 "$t"
+          done
+
+  # ── TSan 构建：同一套测试在 ThreadSanitizer 下再跑一遍，验证零数据竞争 ──
+  tsan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20 # TSan 下程序慢数倍，放宽一点
+    steps:
+      - uses: actions/checkout@v6
+
+      # GitHub runner 的新内核默认 ASLR 随机熵较高，老一点的 TSan 运行时会启动即崩
+      # （"FATAL: unexpected memory mapping"）；调低到 28 是通用做法，对无此问题的环境无副作用。
+      - name: 调低 ASLR 熵（TSan 兼容性）
+        run: sudo sysctl vm.mmap_rnd_bits=28
+
+      - name: CMake 配置 + 构建（-DSAN=thread）
+        run: |
+          cmake -S . -B build-tsan -DSAN=thread
+          cmake --build build-tsan -j
+
+      - name: 单元测试（TSan）
+        run: ctest --test-dir build-tsan --output-on-failure
+
+      - name: 集成测试（TSan）
+        env: # 集成脚本默认跑 ./build/ 下的二进制，用环境变量切到 TSan 版
+          CHAT_BIN: ./build-tsan/chat_server
+          ECHO_BIN: ./build-tsan/echo_server
+        run: |
+          for t in tests/integration/*.py; do
+            echo "==> $t"
+            python3 "$t"
+          done
