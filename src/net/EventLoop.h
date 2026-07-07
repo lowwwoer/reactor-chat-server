@@ -11,6 +11,7 @@
 
 class Channel;
 class EPollPoller;
+class TimerQueue;
 
 class EventLoop {
  public:
@@ -28,6 +29,10 @@ class EventLoop {
   void queueInLoop(Functor cb);
   void wakeup();  // 往 eventfd 写 8 字节，叫醒阻塞中的 epoll_wait
 
+  // delaySeconds 秒后在本 loop 线程执行 cb（附录 A 拉伸项，基于 timerfd）。
+  // 可跨线程调用：内部走 runInLoop 把定时器登记回属主线程。到期时刻按调用时刻算。
+  void runAfter(double delaySeconds, Functor cb);
+
   void updateChannel(Channel* ch);
   void removeChannel(Channel* ch);
 
@@ -44,6 +49,7 @@ class EventLoop {
 
   int wakeupFd_ = -1;                          // eventfd：跨线程唤醒
   std::unique_ptr<Channel> wakeupChannel_;
+  std::unique_ptr<TimerQueue> timerQueue_;     // timerfd 定时器（runAfter 用）
   std::mutex mutex_;                           // 保护 pendingFunctors_（唯一跨线程入口）
   std::vector<Functor> pendingFunctors_;       // 待执行的延迟任务
   std::atomic<bool> callingPendingFunctors_{false};

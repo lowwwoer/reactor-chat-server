@@ -3,6 +3,7 @@
 #include "net/EventLoop.h"
 #include "base/Buffer.h"
 
+#include <chrono>
 #include <memory>
 #include <string>
 
@@ -20,10 +21,31 @@ void ChatServer::setEdgeTriggered(bool on) { server_.setEdgeTriggered(on); }
 
 void ChatServer::start() { server_.start(); }
 
+void ChatServer::armIdleTimer(const TcpConnectionPtr& conn, double delay) {
+  // 捕获 weak_ptr 而非 shared_ptr：定时器不该续着一条已断开的连接的命；
+  // 每次续约都新建一个 one-shot 定时器（续约链），连接断开后 lock 失败即自然终止。
+  std::weak_ptr<TcpConnection> weak = conn;
+  conn->getLoop()->runAfter(delay, [this, weak] {
+    TcpConnectionPtr c = weak.lock();
+    if (!c || !c->connected()) return;  // 已断开：停止续约
+    auto session = std::static_pointer_cast<Session>(c->getContext());
+    const double idle = std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - session->lastActive)
+                            .count();
+    if (idle >= idleTimeout_) {
+      c->send("⏱ 空闲超时，断开连接。\n");
+      c->shutdown();  // 半关闭：欢送语 flush 完再关，对端读到 EOF
+    } else {
+      armIdleTimer(c, idleTimeout_ - idle);  // 还活跃：精确续约到「上次活跃 + 超时」时刻
+    }
+  });
+}
+
 void ChatServer::onConnection(const TcpConnectionPtr& conn) {
   if (conn->connected()) {
     conn->setContext(std::make_shared<Session>());
     conn->send("欢迎！用 /nick <名> 设昵称，/join <房间> 进房，/who 看在线，/quit 退出。\n");
+    if (idleTimeout_ > 0) armIdleTimer(conn, idleTimeout_);
   } else {
     rooms_.leave(conn);  // 断开时把它从所在房间摘掉
   }
@@ -31,6 +53,7 @@ void ChatServer::onConnection(const TcpConnectionPtr& conn) {
 
 void ChatServer::onMessage(const TcpConnectionPtr& conn, Buffer* buf) {
   auto session = std::static_pointer_cast<Session>(conn->getContext());
+  session->lastActive = std::chrono::steady_clock::now();  // 有输入即刷新活跃时间
   for (const std::string& line : codec::takeLines(buf)) {
     if (line.rfind("/nick ", 0) == 0) {
       const std::string nick = line.substr(6);

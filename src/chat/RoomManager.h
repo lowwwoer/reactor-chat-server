@@ -3,6 +3,7 @@
 // 用一把 mutex 保护（设计文档 §6.4）。多个 IO 线程会并发调 join/broadcast：
 // 广播持锁遍历成员逐个 conn->send —— send 只是把写投递回属主 loop（非阻塞、很快），
 // 持锁时间短，成员变更不频繁，锁竞争可控。
+#include <chrono>
 #include <mutex>
 #include <set>
 #include <string>
@@ -14,6 +15,9 @@
 struct Session {
   std::string nick;  // members() 会跨线程读，写必须走 RoomManager::setNick（持锁）
   std::string room;  // 当前所在房间；空串表示还没 /join
+  // 最后活跃时刻，用于空闲踢除（附录 A 拉伸项）。只由属主 IO 线程读写
+  //（onMessage 与空闲定时器回调都在连接的属主 loop），故无需加锁。
+  std::chrono::steady_clock::time_point lastActive{std::chrono::steady_clock::now()};
 };
 
 class RoomManager {

@@ -1,10 +1,12 @@
 #include "net/EventLoop.h"
 #include "net/EPollPoller.h"
 #include "net/Channel.h"
+#include "net/TimerQueue.h"
 #include "base/Logging.h"
 
 #include <sys/eventfd.h>
 #include <unistd.h>
+#include <chrono>
 
 static int createEventfd() {
   int fd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
@@ -23,6 +25,8 @@ EventLoop::EventLoop()
   // eventfd 也注册进 epoll：别的线程往它写 8 字节即可打断 epoll_wait。
   wakeupChannel_->setReadCallback([this] { handleWakeup(); });
   wakeupChannel_->enableReading();
+  // poller_ 已就绪，可安全建 TimerQueue（其构造会把 timerfd 注册进本 loop 的 epoll）。
+  timerQueue_ = std::make_unique<TimerQueue>(this);
 }
 
 EventLoop::~EventLoop() {
@@ -64,6 +68,17 @@ void EventLoop::queueInLoop(Functor cb) {
   // ② 本线程但正在执行 pending 任务——新任务进不了本轮 swap 出来的批次，
   //    不唤醒的话要等下次 poll 超时才会执行。
   if (!isInLoopThread() || callingPendingFunctors_) wakeup();
+}
+
+void EventLoop::runAfter(double delaySeconds, Functor cb) {
+  // 到期时刻在「调用时」就锁定为绝对时间点，跨线程投递路上的排队延迟不影响延时准确性。
+  const auto when = std::chrono::steady_clock::now() +
+                    std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                        std::chrono::duration<double>(delaySeconds));
+  // 堆与 timerfd 只归属主线程动，故经 runInLoop 转发：本线程直接登记，跨线程则排队 + 唤醒。
+  runInLoop([this, when, cb = std::move(cb)]() mutable {
+    timerQueue_->addTimer(when, std::move(cb));
+  });
 }
 
 void EventLoop::wakeup() {

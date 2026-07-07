@@ -22,6 +22,7 @@ add_library(netlib
   src/net/Channel.cc
   src/net/EPollPoller.cc
   src/net/EventLoop.cc
+  src/net/TimerQueue.cc
   src/net/EventLoopThread.cc
   src/net/EventLoopThreadPool.cc
   src/net/Acceptor.cc
@@ -53,6 +54,10 @@ add_test(NAME codec_test COMMAND codec_test)
 add_executable(eventloop_test tests/eventloop_test.cc)
 target_link_libraries(eventloop_test netlib)
 add_test(NAME eventloop_test COMMAND eventloop_test)
+
+add_executable(timer_test tests/timer_test.cc)
+target_link_libraries(timer_test netlib)
+add_test(NAME timer_test COMMAND timer_test)
 
 # ── 压测 ──
 add_executable(bench_client bench/bench_client.cc)
