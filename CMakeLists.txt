@@ -19,6 +19,7 @@ add_library(netlib
   src/base/Buffer.cc
   src/base/InetAddress.cc
   src/base/Socket.cc
+  src/base/AsyncLogger.cc
   src/net/Channel.cc
   src/net/EPollPoller.cc
   src/net/EventLoop.cc
@@ -60,6 +61,10 @@ add_test(NAME eventloop_test COMMAND eventloop_test)
 add_executable(timer_test tests/timer_test.cc)
 target_link_libraries(timer_test netlib)
 add_test(NAME timer_test COMMAND timer_test)
+
+add_executable(async_log_test tests/async_log_test.cc)
+target_link_libraries(async_log_test netlib)
+add_test(NAME async_log_test COMMAND async_log_test)
 
 # ── 压测 ──
 add_executable(bench_client bench/bench_client.cc)
