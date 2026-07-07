@@ -18,7 +18,7 @@ jobs:
           cmake -S . -B build
           cmake --build build -j
 
-      # CMakeLists.txt 里 add_test 注册的三个单测：buffer / codec / eventloop
+      # CMakeLists.txt 里 add_test 注册的单测：buffer / codec / eventloop / timer / async_log
       - name: 单元测试（CTest）
         run: ctest --test-dir build --output-on-failure
 
@@ -54,6 +54,7 @@ jobs:
         env: # 集成脚本默认跑 ./build/ 下的二进制，用环境变量切到 TSan 版
           CHAT_BIN: ./build-tsan/chat_server
           ECHO_BIN: ./build-tsan/echo_server
+          HTTP_BIN: ./build-tsan/http_server
         run: |
           for t in tests/integration/*.py; do
             echo "==> $t"

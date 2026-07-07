@@ -102,17 +102,34 @@ hello everyone   # 普通文本广播到当前房间
 同 loop 的其他连接被饿死——吞吐崩至 LT 的 1/3、p50 达秒级（复跑一致）。
 这是 ET 的经典公平性陷阱，也是本项目**默认 LT** 的实证理由：公平性与可预期延迟优先于峰值。
 
+## 拉伸项（附录 A）
+
+核心四阶段之外，实现了设计计划附录 A 的四个可选拉伸项，每项都配单测/集成测试并纳入 TSan/ASan 回归：
+
+1. **ET 边沿触发模式**（`CHAT_ET=1`）：`Channel` 置 `EPOLLET`、`TcpConnection` 读写循环到 `EAGAIN`；
+   与默认 LT 的吞吐对比见上文「压测 · LT vs ET」，集成测试 `et_mode_it.py` 用 2MB 单行压出 drain 循环。
+2. **定时器 + 空闲连接踢除**（`CHAT_IDLE_SECS=N`）：`TimerQueue` 基于 `timerfd` + 小根堆，所有定时器
+   共用一个 timerfd 指向最早到期者；`EventLoop::runAfter` 可跨线程投递（内部走 `runInLoop` 回属主线程）。
+   聊天层给每条连接记最后活跃时刻，超时未发言即提示并半关闭。单测 `timer_test`（乱序到期 / 跨线程 /
+   回调内续约），集成 `idle_timeout_it.py`（沉默被踢、活跃不被误踢）。
+3. **HTTP demo**（`examples/http_server.cc`，端口 `HTTP_PORT` 默认 8080）：直接复用 `net/` 网络库，
+   业务层只做「攒完整请求头 → 解析请求行 → 回固定页面 + `Connection: close`」，证明这套 epoll/Reactor
+   网络库不绑定聊天协议、可复用于任意字节流协议。集成 `http_it.py`（`GET` 返回 200、正文回显方法与路径）。
+4. **简单异步日志**（`src/base/AsyncLogger`）：双缓冲——前端多线程持锁把整行拷进当前缓冲（保证不撕裂），
+   写满即挂待写队列并唤醒后端；后端线程 swap 出队列在锁外落盘，停止时 flush 残留不丢日志。单测
+   `async_log_test`（4 线程 × 5000 行，校验落盘总行数与每行完整性，TSan 零竞争）。
+
 ## 测试
 
 ```bash
-# 单测（Buffer/Codec/EventLoop 跨线程投递）
+# 单测（Buffer/Codec/EventLoop 跨线程投递/定时器/异步日志）
 ./build/buffer_test && ./build/codec_test && ./build/eventloop_test
-# 集成（echo / 多客户端聊天 / 大消息半关闭 / ET 模式 2MB drain）
-python3 tests/integration/echo_it.py
-python3 tests/integration/chat_it.py
-python3 tests/integration/halfclose_it.py
-python3 tests/integration/et_mode_it.py
-# sanitizer 构建（CHAT_BIN 切换被测二进制）
+./build/timer_test && ./build/async_log_test
+# 或一键 ctest
+ctest --test-dir build --output-on-failure
+# 集成（echo / 聊天 / 半关闭 / ET drain / 空闲踢除 / HTTP demo …）
+for t in tests/integration/*.py; do python3 "$t"; done
+# sanitizer 构建（CHAT_BIN/HTTP_BIN 切换被测二进制）
 cmake -S . -B build-tsan -DSAN=thread && cmake --build build-tsan -j
 CHAT_BIN=./build-tsan/chat_server python3 tests/integration/chat_it.py
 ```
