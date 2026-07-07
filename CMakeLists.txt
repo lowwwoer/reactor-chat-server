@@ -40,6 +40,8 @@ add_executable(echo_server examples/echo_server.cc)
 target_link_libraries(echo_server netlib)
 add_executable(chat_server examples/chat_server.cc)
 target_link_libraries(chat_server netlib)
+add_executable(http_server examples/http_server.cc)
+target_link_libraries(http_server netlib)
 
 # ── 测试 ──
 enable_testing()
